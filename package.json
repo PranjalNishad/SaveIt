@@ -1,0 +1,22 @@
+{
+  "name": "tg-downloader-bot",
+  "version": "1.0.0",
+  "description": "Production-grade Telegram video downloader bot",
+"scripts": {
+  "dev:bot": "unset BOT_TOKEN && bun --env-file=.env --watch src/bot/index.ts",
+  "dev:worker": "unset BOT_TOKEN && bun --env-file=.env --watch src/worker/index.ts",
+  "bot": "unset BOT_TOKEN && bun --env-file=.env src/bot/index.ts",
+  "worker": "unset BOT_TOKEN && bun --env-file=.env src/worker/index.ts"
+},
+  "dependencies": {
+    "telegraf": "^4.16.3",
+    "bullmq": "^5.7.0",
+    "ioredis": "^5.3.2",
+    "dotenv": "^16.4.5",
+    "winston": "^3.13.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.12.7",
+    "typescript": "^5.4.5"
+  }
+}

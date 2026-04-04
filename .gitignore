@@ -1,0 +1,8 @@
+node_modules/
+dist/
+.env
+temp/
+logs/
+*.mp4
+*.mp3
+bun.lockb
