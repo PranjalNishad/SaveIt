@@ -1,130 +1,78 @@
 import type { Context } from "telegraf";
-import { MESSAGES, FAST_PLATFORMS, REDIS_KEYS, DOWNLOAD } from "@/constants";
+import { MESSAGES } from "@/constants/messages";
 import { logger } from "@/utils/logger";
 import { redis } from "@/config/redis";
-import { downloadMedia } from "@/services/download.service";
+import { enqueueDownload } from "@/queue/download.queue";
+import { CacheService } from "@/services/cache.service";
 import { TelegramService } from "@/services/telegram.service";
-import { enqueueDownload } from "@/queue/queue";
-import { safeDelete } from "@/utils/file";
 import { env } from "@/config/env";
-import type { OutputFormat, Platform } from "@/types";
+import type { Platform } from "@/types";
+import { REDIS_KEYS } from "@/constants/redis-keys";
+import { normalizeUrl } from "@/utils/url";
 
 const telegram = new TelegramService(env.BOT_TOKEN);
 
-// Semaphore limits simultaneous downloads ─────────────────────────────────
-let activeDownloads = 0;
-
-async function handleFastDownload(
-  chatId: number,
-  messageId: number,
-  url: string,
-  format: OutputFormat,
-  platform: Platform,
-): Promise<void> {
-  // If already at max, tell user to wait
-  if (activeDownloads >= DOWNLOAD.MAX_CONCURRENT_DOWNLOADS) {
-    await telegram.editMessage(
-      chatId,
-      messageId,
-      `⏳ Server is busy (${activeDownloads} downloads running). Please wait and try again.`,
-    );
-    return;
-  }
-
-  activeDownloads++;
-  logger.info(`Active downloads: ${activeDownloads}`);
-
-  try {
-    const result = await downloadMedia(url, format, platform);
-
-    if (!result.success) {
-      await telegram.editMessage(
-        chatId,
-        messageId,
-        result.error?.startsWith("FILE_TOO_LARGE")
-          ? MESSAGES.FILE_TOO_LARGE
-          : MESSAGES.DOWNLOAD_FAILED,
-      );
-      if (result.filePath) await safeDelete(result.filePath);
-      return;
-    }
-
-    try {
-      format === "audio"
-        ? await telegram.sendAudio(chatId, result.filePath!)
-        : await telegram.sendVideo(chatId, result.filePath!);
-      await telegram.editMessage(chatId, messageId, MESSAGES.DONE);
-    } finally {
-      if (result.filePath) await safeDelete(result.filePath);
-    }
-  } finally {
-    activeDownloads--;
-    logger.info(`Active downloads: ${activeDownloads}`);
-  }
-}
-
-// ── Main callback handler ─────────────────────────────────────────────────────
 export async function handleCallback(ctx: Context): Promise<void> {
-  try {
-    const data: string = (ctx.callbackQuery as any)?.data ?? "";
-    if (!data.startsWith("dl:")) return;
-
     try {
-      await ctx.answerCbQuery("⏳ Starting download...");
-    } catch {}
+        const data: string = (ctx.callbackQuery as any)?.data ?? "";
+        if (!data.startsWith("dl:")) return;
 
-    const [, format, ...keyParts] = data.split(":");
-    const key = keyParts.join(":");
+        try {
+            await ctx.answerCbQuery("⏳ Starting download...");
+        } catch {}
 
-    const stored = await redis.get(key);
-    if (!stored) {
-      await ctx.reply(MESSAGES.LINK_EXPIRED);
-      return;
+        // data format: dl:audio:userId:timestamp
+        const [, format, ...keyParts] = data.split(":");
+        const keySuffix = keyParts.join(":");
+        const key = `${REDIS_KEYS.LINK_PREFIX}:${keySuffix}`;
+
+        const stored = await redis.get(key);
+        if (!stored) {
+            await ctx.reply(MESSAGES.LINK_EXPIRED);
+            return;
+        }
+
+        const { url, platform } = JSON.parse(stored) as {
+            url: string;
+            platform: Platform;
+        };
+        const normalizedUrl = normalizeUrl(url, platform);
+        const replyToMessageId = (ctx.callbackQuery as any)?.message?.message_id as number | undefined;
+        // Don't delete the key yet, because maybe they want to click it again if it fails?
+        // Actually yes, let's keep it until it expires via TTL.
+
+        // Check cache first for AUDIO
+        if (format === "audio") {
+            const cachedAudio = await CacheService.getMedia(normalizedUrl, platform, "audio");
+            if (cachedAudio) {
+                logger.info("Cache hit for audio", { url: normalizedUrl });
+                await telegram.sendAudio(ctx.chat!.id, cachedAudio.fileId, {
+                    replyToMessageId,
+                });
+                return;
+            }
+        }
+
+        const processingMsg = await ctx.reply(MESSAGES.PROCESSING("audio"), { parse_mode: "Markdown" });
+
+        // Queue path
+        const enqueued = await enqueueDownload({
+            chatId: ctx.chat!.id,
+            messageId: processingMsg.message_id,
+            replyToMessageId,
+            url: normalizedUrl,
+            format: "audio",
+            platform,
+            requestedAt: Date.now(),
+        });
+
+        if (enqueued.deduped) {
+            await telegram.editMessage(ctx.chat!.id, processingMsg.message_id, MESSAGES.ALREADY_PROCESSING("audio"));
+        }
+    } catch (err) {
+        logger.error("Callback handler error", err);
+        try {
+            await ctx.reply(MESSAGES.GENERIC_ERROR);
+        } catch {}
     }
-
-    const { url, platform } = JSON.parse(stored) as {
-      url: string;
-      platform: Platform;
-    };
-    await redis.del(key);
-
-    const processingMsg = await ctx.reply(
-      MESSAGES.PROCESSING(format as OutputFormat),
-      {
-        parse_mode: "Markdown",
-      },
-    );
-
-    const chatId = ctx.chat!.id;
-    const messageId = processingMsg.message_id;
-
-    // Fast path — fire and forget
-    if (FAST_PLATFORMS.includes(platform)) {
-      handleFastDownload(
-        chatId,
-        messageId,
-        url,
-        format as OutputFormat,
-        platform,
-      ).catch((err) => {
-        logger.error("Fast download error", err);
-      });
-      return;
-    }
-
-    // Queue path — YouTube
-    await enqueueDownload({
-      chatId,
-      messageId,
-      url,
-      format: format as OutputFormat,
-      platform,
-      requestedAt: Date.now(),
-    });
-  } catch (err) {
-    logger.error("Callback handler error", err);
-    try {
-      await ctx.reply(MESSAGES.GENERIC_ERROR);
-    } catch {}
-  }
 }

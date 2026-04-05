@@ -1,30 +1,49 @@
-// ─── Platform & Format ──────────────────────────────────────────────────────
-
-export type Platform     = "youtube" | "instagram" | "twitter" | "tiktok";
+export type Platform = "youtube" | "instagram" | "twitter" | "tiktok";
 export type OutputFormat = "video" | "audio";
 
-// ─── Job ────────────────────────────────────────────────────────────────────
-
 export interface DownloadJobData {
-  chatId:      number;
-  messageId:   number;
-  url:         string;
-  platform:    Platform;
-  format:      OutputFormat;
-  requestedAt: number;
+    chatId: number;
+    messageId: number;
+    replyToMessageId?: number;
+    inFlightKey?: string;
+    url: string;
+    platform: Platform;
+    format: OutputFormat;
+    requestedAt: number;
+    audioKey?: string;
 }
 
-// ─── Rate Limit ─────────────────────────────────────────────────────────────
+export interface EnqueueResult {
+    jobId: string;
+    deduped: boolean;
+}
 
 export interface RateLimitInfo {
-  allowed:        boolean;
-  remaining:      number;
-  resetInSeconds: number;
+    allowed: boolean;
+    remaining: number;
+    resetInSeconds: number;
 }
 
-// ─── Detected Link ──────────────────────────────────────────────────────────
-
 export interface DetectedLink {
-  url:      string;
-  platform: Platform;
+    url: string;
+    platform: Platform;
+}
+
+export interface DownloadResult {
+    success: boolean;
+    filePath?: string;
+    fileSizeBytes?: number;
+    error?: string;
+}
+
+export interface CachedMedia {
+    fileId: string;
+    format: OutputFormat;
+    platform: Platform;
+    cachedAt: number;
+}
+
+export interface TelegramSendOptions {
+    audioKey?: string;
+    replyToMessageId?: number;
 }
