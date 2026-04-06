@@ -24,6 +24,9 @@ RUN bun install --production --frozen-lockfile
 
 COPY --from=builder /app/dist ./dist
 
+ENV PORT=3000
+EXPOSE 3000
+
 RUN mkdir -p logs temp && chown -R bun:bun /app
 
 USER bun
