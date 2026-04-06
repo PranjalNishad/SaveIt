@@ -14,18 +14,18 @@ bot.on("text", handleMessage);
 bot.on("callback_query", handleCallback);
 
 bot.catch((err, ctx) => {
-    logger.error("Unhandled bot error", { err, update: ctx.update });
+  logger.error("Unhandled bot error", { err, update: ctx.update });
 });
 
 async function main() {
-    logger.info("Starting bot...");
-    process.once("SIGINT", () => bot.stop("SIGINT"));
-    process.once("SIGTERM", () => bot.stop("SIGTERM"));
-    await bot.launch();
-    logger.info("✅ Bot is running");
+  logger.info("Starting bot...");
+  process.once("SIGINT", () => bot.stop("SIGINT"));
+  process.once("SIGTERM", () => bot.stop("SIGTERM"));
+  await bot.launch();
+  logger.info("✅ Bot is running");
 }
 
 main().catch((err) => {
-    logger.error("Fatal error starting bot", err);
-    process.exit(1);
+  logger.error("Fatal error starting bot", err);
+  process.exit(1);
 });
