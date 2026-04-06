@@ -1,8 +1,11 @@
 node_modules/
 dist/
 .env
+.env.local
 temp/
 logs/
 *.mp4
 *.mp3
-bun.lockb
+*.rdb
+dump.rdb
+cookies.txt
