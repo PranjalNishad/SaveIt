@@ -15,7 +15,8 @@ RUN apk add --no-cache \
     py3-pip \
     ffmpeg \
     tini && \
-    python3 -m pip install --no-cache-dir --break-system-packages -U yt-dlp
+    deno && \
+    python3 -m pip install --no-cache-dir --break-system-packages -U yt-dlp 
 
 WORKDIR /app
 
