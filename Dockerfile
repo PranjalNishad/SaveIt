@@ -16,7 +16,13 @@ RUN apk add --no-cache \
     ffmpeg \
     tini && \
     deno && \
+     curl \
+    unzip && \
+    curl -fsSL https://deno.land/install.sh | sh && \
     python3 -m pip install --no-cache-dir --break-system-packages -U yt-dlp 
+
+ENV DENO_INSTALL="/root/.deno"
+ENV PATH="${DENO_INSTALL}/bin:${PATH}"
 
 WORKDIR /app
 
@@ -33,6 +39,7 @@ COPY --chown=bun:bun instagram_cookies.txt ./instagram_cookies.txt
 
 ENV PORT=3000
 EXPOSE 3000
+
 
 USER bun
 
