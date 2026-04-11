@@ -9,3 +9,4 @@ logs/
 *.rdb
 dump.rdb
 cookies.txt
+*_cookies.txt

@@ -24,10 +24,14 @@ RUN bun install --production --frozen-lockfile
 
 COPY --from=builder /app/dist ./dist
 
-ENV PORT=3000
-EXPOSE 3000
 
 RUN mkdir -p logs temp && chown -R bun:bun /app
+
+COPY --chown=bun:bun youtube_cookies.txt ./youtube_cookies.txt
+COPY --chown=bun:bun instagram_cookies.txt ./instagram_cookies.txt
+
+ENV PORT=3000
+EXPOSE 3000
 
 USER bun
 
