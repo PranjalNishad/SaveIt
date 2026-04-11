@@ -7,8 +7,8 @@ export const DOWNLOAD = {
   AUDIO_FORMAT: "mp3",
   VIDEO_FORMAT: "mp4",
   VIDEO_FORMAT_SELECTOR:
-    "bestvideo[filesize<45M][ext=mp4]+bestaudio[ext=m4a]/bestvideo[height<=720][filesize<45M][ext=mp4]+bestaudio[ext=m4a]/bestvideo[height<=480][filesize<45M][ext=mp4]+bestaudio[ext=m4a]/bestvideo[height<=360][filesize<45M][ext=mp4]+bestaudio[ext=m4a]/best[filesize<45M][ext=mp4]/best[filesize<45M]",
+    "bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best",
   INSTAGRAM_USER_AGENT: "Mozilla/5.0",
-  YOUTUBE_COOKIES_FILE: "/app/youtube_cookies.txt",
+  YOUTUBE_COOKIES_FILE: "./youtube_cookies.txt",
   INSTAGRAM_COOKIES_FILE: "./instagram_cookies.txt",
 } as const;
