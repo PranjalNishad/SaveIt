@@ -5,7 +5,9 @@ import { handleMessage } from "@/bot/handlers/message.handler";
 import { handleCallback } from "@/bot/handlers/callback.handler";
 import { env } from "@/config/env";
 
-const bot = new Telegraf(env.BOT_TOKEN);
+const bot = new Telegraf(process.env.BOT_TOKEN!, {
+  telegram: { apiRoot: "https://api.telegram.org" }
+});
 
 bot.start((ctx) => ctx.reply(MESSAGES.WELCOME, { parse_mode: "Markdown" }));
 bot.help((ctx) => ctx.reply(MESSAGES.HELP, { parse_mode: "Markdown" }));
