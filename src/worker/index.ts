@@ -118,6 +118,14 @@ worker.on("failed", async (job, err) => {
 });
 worker.on("error", (err) => logger.error("Worker error", err));
 
+// Keep worker alive on stray async errors — BullMQ retries the job itself.
+process.on("unhandledRejection", (reason) => {
+  logger.error("Worker unhandledRejection", { reason: String(reason) });
+});
+process.on("uncaughtException", (err) => {
+  logger.error("Worker uncaughtException", { err: err.message });
+});
+
 async function main() {
     logger.info("✅ Worker started, waiting for jobs...");
     process.once("SIGINT", async () => {

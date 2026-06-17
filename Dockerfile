@@ -14,15 +14,15 @@ RUN apk add --no-cache \
     python3 \
     py3-pip \
     ffmpeg \
-    tini && \
-    deno && \
-     curl \
-    unzip && \
-    curl -fsSL https://deno.land/install.sh | sh && \
-    python3 -m pip install --no-cache-dir --break-system-packages -U yt-dlp 
+    tini \
+    curl
 
-ENV DENO_INSTALL="/root/.deno"
-ENV PATH="${DENO_INSTALL}/bin:${PATH}"
+# yt-dlp lives in a venv owned by the runtime user so it can self-update at
+# startup without root (YouTube breaks often — stale yt-dlp = broken downloads).
+ENV VENV=/app/venv
+ENV PATH="${VENV}/bin:${PATH}"
+RUN python3 -m venv "$VENV" && \
+    "$VENV/bin/pip" install --no-cache-dir -U yt-dlp
 
 WORKDIR /app
 
@@ -30,19 +30,18 @@ COPY package.json bun.lock ./
 RUN bun install --production --frozen-lockfile
 
 COPY --from=builder /app/dist ./dist
+COPY --chown=bun:bun docker-entrypoint.sh ./docker-entrypoint.sh
+RUN chmod +x ./docker-entrypoint.sh
 
-
-RUN mkdir -p logs temp && chown -R bun:bun /app
-
-COPY --chown=bun:bun youtube_cookies.txt ./youtube_cookies.txt
-COPY --chown=bun:bun instagram_cookies.txt ./instagram_cookies.txt
+# Cookies are OPTIONAL and mounted as a volume (see docker-compose). The primary
+# YouTube path needs no cookies; mount only if you have them — refresh without rebuild.
+RUN mkdir -p logs temp && chown -R bun:bun /app "$VENV"
 
 ENV PORT=3000
 EXPOSE 3000
 
-
 USER bun
 
-ENTRYPOINT ["tini", "--"]
+ENTRYPOINT ["tini", "--", "./docker-entrypoint.sh"]
 
 CMD ["bun", "dist/index.js"]

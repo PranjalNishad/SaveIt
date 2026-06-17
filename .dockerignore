@@ -8,3 +8,5 @@ temp
 *.rdb
 dump.rdb
 cookies.txt
+cookies
+*_cookies.txt

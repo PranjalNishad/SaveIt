@@ -14,6 +14,18 @@ services:
             - .env
         environment:
             REDIS_URL: redis://redis:6379
+            # Cookies optional — primary YouTube path needs none.
+            YOUTUBE_COOKIES_FILE: /app/cookies/youtube_cookies.txt
+            INSTAGRAM_COOKIES_FILE: /app/cookies/instagram_cookies.txt
+            # Optional self-hosted Cobalt fallback:
+            # COBALT_API_KEY: ""
+            # COBALT_INSTANCES: ""
+            # Override yt-dlp YouTube clients if a new one is needed:
+            # YTDLP_YT_CLIENTS: "tv_embedded,default,web_safari"
+        volumes:
+            # Drop cookie files here to refresh them WITHOUT rebuilding the image.
+            # Safe to leave empty — downloads still work without cookies.
+            - ./cookies:/app/cookies:ro
         depends_on:
             - redis
         restart: unless-stopped

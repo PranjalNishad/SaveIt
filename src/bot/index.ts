@@ -19,6 +19,14 @@ bot.catch((err, ctx) => {
   logger.error("Unhandled bot error", { err, update: ctx.update });
 });
 
+// Never let a stray async error kill the process — log and keep running.
+process.on("unhandledRejection", (reason) => {
+  logger.error("Bot unhandledRejection", { reason: String(reason) });
+});
+process.on("uncaughtException", (err) => {
+  logger.error("Bot uncaughtException", { err: err.message });
+});
+
 async function main() {
   logger.info("Starting bot...");
   process.once("SIGINT", () => bot.stop("SIGINT"));
