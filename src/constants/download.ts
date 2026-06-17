@@ -7,13 +7,15 @@ export const DOWNLOAD = {
   AUDIO_FORMAT: "mp3",
   VIDEO_FORMAT: "mp4",
 
-  // Smart quality fallback — best quality under 45MB, steps down if needed
+  // Smart quality fallback — best quality under ~45MB, steps down if needed.
+  // Uses BOTH filesize and filesize_approx (Instagram/DASH only report approx),
+  // then plain height-capped fallbacks (post-download 50MB check guards oversize).
   VIDEO_FORMAT_SELECTOR:
-    "bestvideo[filesize<45M][ext=mp4]+bestaudio[ext=m4a]/" +
-    "bestvideo[height<=720][filesize<45M][ext=mp4]+bestaudio[ext=m4a]/" +
-    "bestvideo[height<=480][filesize<45M][ext=mp4]+bestaudio[ext=m4a]/" +
-    "bestvideo[height<=360][filesize<45M][ext=mp4]+bestaudio[ext=m4a]/" +
-    "best[filesize<45M][ext=mp4]/best[filesize<45M]",
+    "bestvideo[height<=1080][filesize<45M][ext=mp4]+bestaudio[ext=m4a]/" +
+    "bestvideo[height<=1080][filesize_approx<45M][ext=mp4]+bestaudio[ext=m4a]/" +
+    "bestvideo[height<=720][ext=mp4]+bestaudio[ext=m4a]/" +
+    "bestvideo[height<=720]+bestaudio/" +
+    "best[height<=720][ext=mp4]/best[ext=mp4]/best",
 
   INSTAGRAM_USER_AGENT: "Mozilla/5.0",
 
