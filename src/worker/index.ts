@@ -8,6 +8,7 @@ import { MESSAGES } from "@/constants/messages";
 import { QUEUE } from "@/constants/queue";
 import { env } from "@/config/env";
 import { createRedisConnection, redis } from "@/config/redis";
+import { throttled } from "@/utils/log-throttle";
 import type { DownloadJobData } from "@/types";
 
 const telegram = new TelegramService(env.BOT_TOKEN);
@@ -116,7 +117,14 @@ worker.on("failed", async (job, err) => {
         err: err.message,
     });
 });
-worker.on("error", (err) => logger.error("Worker error", err));
+const throttleWorkerErr = throttled();
+worker.on("error", (err) =>
+    throttleWorkerErr(() =>
+        logger.error("Worker error (suppressing repeats 30s)", {
+            error: err.message || (err as any).code || "connection failed",
+        }),
+    ),
+);
 
 // Keep worker alive on stray async errors — BullMQ retries the job itself.
 process.on("unhandledRejection", (reason) => {

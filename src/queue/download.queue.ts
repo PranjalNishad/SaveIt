@@ -6,6 +6,7 @@ import { createRedisConnection } from "@/config/redis";
 import { createHash } from "crypto";
 import { REDIS_KEYS } from "@/constants/redis-keys";
 import { env } from "@/config/env";
+import { throttled } from "@/utils/log-throttle";
 
 // Create a dedicated Redis connection for the queue (BullMQ requirement)
 const queueRedis = createRedisConnection("queue");
@@ -27,8 +28,13 @@ export const videoQueue = new Queue<DownloadJobData>(QUEUE.NAME, {
     },
 });
 
+const throttleQueueErr = throttled();
 videoQueue.on("error", (err) => {
-    logger.error("Queue error", err);
+    throttleQueueErr(() =>
+        logger.error("Queue error (suppressing repeats 30s)", {
+            error: err.message || (err as any).code || "connection failed",
+        }),
+    );
 });
 
 export async function enqueueDownload(data: DownloadJobData): Promise<EnqueueResult> {
