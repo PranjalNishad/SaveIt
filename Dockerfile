@@ -15,6 +15,12 @@ RUN apk add --no-cache \
     py3-pip \
     ffmpeg \
     tini \
+    curl \
+    unzip \
+    nodejs && \
+    py3-pip \
+    ffmpeg \
+    tini \
     curl
 
 # yt-dlp lives in a venv owned by the runtime user so it can self-update at
