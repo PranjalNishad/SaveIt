@@ -12,7 +12,6 @@ FROM oven/bun:1.3.11-alpine AS runner
 
 RUN apk add --no-cache \
     python3 \
-    py3-pip \
     ffmpeg \
     tini \
     curl \
