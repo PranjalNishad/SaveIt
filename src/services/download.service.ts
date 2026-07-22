@@ -20,12 +20,12 @@ interface CobaltResponse {
 async function tryCobaltInstance(
   instanceUrl: string,
   url: string,
-  format: OutputFormat
+  format: OutputFormat,
 ): Promise<CobaltResponse | null> {
   try {
     const body: Record<string, unknown> = {
       url,
-      videoQuality: "720",
+      videoQuality: "best",
       filenameStyle: "basic",
     };
 
@@ -39,7 +39,7 @@ async function tryCobaltInstance(
 
     const headers: Record<string, string> = {
       "Content-Type": "application/json",
-      "Accept": "application/json",
+      Accept: "application/json",
     };
     if (DOWNLOAD.COBALT_API_KEY) {
       headers["Authorization"] = `Api-Key ${DOWNLOAD.COBALT_API_KEY}`;
@@ -53,7 +53,7 @@ async function tryCobaltInstance(
     });
 
     if (!response.ok) return null;
-    return await response.json() as CobaltResponse;
+    return (await response.json()) as CobaltResponse;
   } catch {
     return null;
   }
@@ -61,7 +61,7 @@ async function tryCobaltInstance(
 
 async function downloadFileFromUrl(
   downloadUrl: string,
-  outputPath: string
+  outputPath: string,
 ): Promise<void> {
   const response = await fetch(downloadUrl, {
     signal: AbortSignal.timeout(DOWNLOAD.TIMEOUT_SECONDS * 1000),
@@ -78,7 +78,7 @@ async function downloadFileFromUrl(
 async function downloadViaCoablt(
   url: string,
   format: OutputFormat,
-  outputPath: string
+  outputPath: string,
 ): Promise<{ success: boolean; error?: string }> {
   // Public api.cobalt.tools now requires auth. Skip entirely unless configured.
   const instances = DOWNLOAD.COBALT_INSTANCES.length
@@ -101,7 +101,11 @@ async function downloadViaCoablt(
     }
 
     if (result.status === "error" || result.status === "rate-limit") {
-      logger.warn("Cobalt returned error", { instance, status: result.status, text: result.text });
+      logger.warn("Cobalt returned error", {
+        instance,
+        status: result.status,
+        text: result.text,
+      });
       continue;
     }
 
@@ -116,7 +120,10 @@ async function downloadViaCoablt(
       logger.info("Cobalt download success", { instance });
       return { success: true };
     } catch (err: any) {
-      logger.warn("Cobalt file download failed", { instance, err: err.message });
+      logger.warn("Cobalt file download failed", {
+        instance,
+        err: err.message,
+      });
       continue;
     }
   }
@@ -145,11 +152,15 @@ function buildArgs(
   const args: string[] = [
     "--no-playlist",
     "--no-warnings",
-    "--socket-timeout", String(DOWNLOAD.SOCKET_TIMEOUT_SECONDS),
-    "--retries", String(DOWNLOAD.RETRIES),
+    "--socket-timeout",
+    String(DOWNLOAD.SOCKET_TIMEOUT_SECONDS),
+    "--retries",
+    String(DOWNLOAD.RETRIES),
     "--no-part",
-    "--concurrent-fragments", String(DOWNLOAD.CONCURRENT_FRAGMENTS),
-    "-o", outputPath,
+    "--concurrent-fragments",
+    String(DOWNLOAD.CONCURRENT_FRAGMENTS),
+    "-o",
+    outputPath,
   ];
 
   if (platform === "instagram") {
@@ -164,16 +175,20 @@ function buildArgs(
   if (format === "audio") {
     args.push(
       "-x",
-      "--audio-format", DOWNLOAD.AUDIO_FORMAT,
-      "--audio-quality", DOWNLOAD.AUDIO_QUALITY,
+      "--audio-format",
+      DOWNLOAD.AUDIO_FORMAT,
+      "--audio-quality",
+      DOWNLOAD.AUDIO_QUALITY,
       url,
     );
     return args;
   }
 
   args.push(
-    "-f", DOWNLOAD.VIDEO_FORMAT_SELECTOR,
-    "--merge-output-format", DOWNLOAD.VIDEO_FORMAT,
+    "-f",
+    DOWNLOAD.VIDEO_FORMAT_SELECTOR,
+    "--merge-output-format",
+    DOWNLOAD.VIDEO_FORMAT,
     url,
   );
 
@@ -193,8 +208,12 @@ async function runYtDlp(
       proc.kill("SIGKILL");
     }, DOWNLOAD.TIMEOUT_SECONDS * 1000);
 
-    proc.stdout.on("data", (chunk) => { stdout += chunk.toString(); });
-    proc.stderr.on("data", (chunk) => { stderr += chunk.toString(); });
+    proc.stdout.on("data", (chunk) => {
+      stdout += chunk.toString();
+    });
+    proc.stderr.on("data", (chunk) => {
+      stderr += chunk.toString();
+    });
 
     proc.on("error", (err) => {
       clearTimeout(timeout);
@@ -214,17 +233,32 @@ function ytBaseArgs(outputPath: string, format: OutputFormat): string[] {
   const args = [
     "--no-playlist",
     "--no-warnings",
-    "--socket-timeout", String(DOWNLOAD.SOCKET_TIMEOUT_SECONDS),
-    "--retries", String(DOWNLOAD.RETRIES),
+    "--socket-timeout",
+    String(DOWNLOAD.SOCKET_TIMEOUT_SECONDS),
+    "--retries",
+    String(DOWNLOAD.RETRIES),
     "--no-part",
-    "--concurrent-fragments", String(DOWNLOAD.CONCURRENT_FRAGMENTS),
-    "-o", outputPath,
+    "--concurrent-fragments",
+    String(DOWNLOAD.CONCURRENT_FRAGMENTS),
+    "-o",
+    outputPath,
   ];
 
   if (format === "audio") {
-    args.push("-x", "--audio-format", DOWNLOAD.AUDIO_FORMAT, "--audio-quality", DOWNLOAD.AUDIO_QUALITY);
+    args.push(
+      "-x",
+      "--audio-format",
+      DOWNLOAD.AUDIO_FORMAT,
+      "--audio-quality",
+      DOWNLOAD.AUDIO_QUALITY,
+    );
   } else {
-    args.push("-f", DOWNLOAD.VIDEO_FORMAT_SELECTOR, "--merge-output-format", DOWNLOAD.VIDEO_FORMAT);
+    args.push(
+      "-f",
+      DOWNLOAD.VIDEO_FORMAT_SELECTOR,
+      "--merge-output-format",
+      DOWNLOAD.VIDEO_FORMAT,
+    );
   }
 
   return args;
@@ -242,7 +276,8 @@ async function downloadYouTubeViaYtDlp(
   for (const client of DOWNLOAD.YOUTUBE_CLIENTS) {
     const args = [
       ...ytBaseArgs(outputPath, format),
-      "--extractor-args", `youtube:player_client=${client}`,
+      "--extractor-args",
+      `youtube:player_client=${client}`,
       url,
     ];
     logger.info("YouTube yt-dlp attempt", { client });
@@ -258,7 +293,8 @@ async function downloadYouTubeViaYtDlp(
     logger.info("YouTube cookie fallback");
     const args = [
       ...ytBaseArgs(outputPath, format),
-      "--cookies", DOWNLOAD.YOUTUBE_COOKIES_FILE,
+      "--cookies",
+      DOWNLOAD.YOUTUBE_COOKIES_FILE,
       url,
     ];
     const res = await runYtDlp(args);
@@ -271,7 +307,11 @@ async function downloadYouTubeViaYtDlp(
 }
 
 async function safeUnlink(p: string): Promise<void> {
-  try { await fs.promises.unlink(p); } catch { /* not present */ }
+  try {
+    await fs.promises.unlink(p);
+  } catch {
+    /* not present */
+  }
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
@@ -283,7 +323,8 @@ export async function downloadMedia(
   format: OutputFormat,
   platform: Platform,
 ): Promise<DownloadResult> {
-  const ext = format === "audio" ? DOWNLOAD.AUDIO_FORMAT : DOWNLOAD.VIDEO_FORMAT;
+  const ext =
+    format === "audio" ? DOWNLOAD.AUDIO_FORMAT : DOWNLOAD.VIDEO_FORMAT;
   const outputPath = tempFilePath(ext as "mp4" | "mp3");
 
   logger.info("Starting download", { url, format, platform, outputPath });
@@ -310,7 +351,7 @@ export async function downloadMedia(
         }
       }
 
-    // ── Instagram, TikTok, Twitter → yt-dlp ─────────────────────────────────
+      // ── Instagram, TikTok, Twitter → yt-dlp ─────────────────────────────────
     } else {
       const args = buildArgs(url, outputPath, format, platform);
       const ytResult = await runYtDlp(args);
@@ -339,7 +380,6 @@ export async function downloadMedia(
 
     logger.info("Download complete", { outputPath, sizeBytes });
     return { success: true, filePath: outputPath, fileSizeBytes: sizeBytes };
-
   } catch (err: any) {
     const msg = err?.message ?? String(err);
     logger.error("Download failed", { url, error: msg });
