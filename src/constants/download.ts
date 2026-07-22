@@ -11,11 +11,7 @@ export const DOWNLOAD = {
   // Uses BOTH filesize and filesize_approx (Instagram/DASH only report approx),
   // then plain height-capped fallbacks (post-download 50MB check guards oversize).
   VIDEO_FORMAT_SELECTOR:
-    "bestvideo[height<=1080][filesize<45M][ext=mp4]+bestaudio[ext=m4a]/" +
-    "bestvideo[height<=1080][filesize_approx<45M][ext=mp4]+bestaudio[ext=m4a]/" +
-    "bestvideo[height<=720][ext=mp4]+bestaudio[ext=m4a]/" +
-    "bestvideo[height<=720]+bestaudio/" +
-    "best[height<=720][ext=mp4]/best[ext=mp4]/best",
+    "bv*+ba/b",
 
   INSTAGRAM_USER_AGENT: "Mozilla/5.0",
 
