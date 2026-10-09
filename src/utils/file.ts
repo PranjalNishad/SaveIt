@@ -33,3 +33,38 @@ export async function getFileSizeBytes(filePath: string): Promise<number> {
         return -1;
     }
 }
+
+/**
+ * Delete files in TEMP_DIR older than `maxAgeMs` and return how many were removed.
+ *
+ * Called once at worker startup so orphans from a previous crash or force-kill do
+ * not accumulate. The age guard means a download in flight (in another live
+ * process) is never touched — only clearly stale files are swept.
+ */
+export async function sweepTempDir(maxAgeMs: number): Promise<number> {
+    ensureTempDir();
+    let removed = 0;
+
+    try {
+        const cutoff = Date.now() - maxAgeMs;
+        const entries = await fs.promises.readdir(env.TEMP_DIR, { withFileTypes: true });
+
+        for (const entry of entries) {
+            if (!entry.isFile()) continue;
+            const full = path.join(env.TEMP_DIR, entry.name);
+            try {
+                const stat = await fs.promises.stat(full);
+                if (stat.mtimeMs < cutoff) {
+                    await fs.promises.unlink(full);
+                    removed += 1;
+                }
+            } catch {
+                /* file vanished or is unreadable — skip it */
+            }
+        }
+    } catch (err: any) {
+        logger.warn("Temp-dir sweep failed", { err: err?.message ?? String(err) });
+    }
+
+    return removed;
+}

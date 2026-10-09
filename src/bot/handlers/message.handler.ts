@@ -17,6 +17,10 @@ export async function handleMessage(ctx: Context): Promise<void> {
     const text = (ctx.message as any)?.text as string | undefined;
     if (!text) return;
 
+    // Commands (/start, /help) have their own handlers; ignoring them here
+    // prevents a spurious "unknown link" reply.
+    if (text.startsWith("/")) return;
+
     const detected = detectLink(text);
     if (!detected) {
         await ctx.reply(MESSAGES.INVALID_URL);
@@ -35,12 +39,19 @@ export async function handleMessage(ctx: Context): Promise<void> {
 
     logger.info("Link detected", { userId, platform });
 
-    // Store URL in Redis for the audio fallback button
+    // Store URL in Redis for the audio fallback button. Best-effort: if Redis is
+    // unavailable the video still downloads — only the audio button would expire.
     const linkKeyTimestamp = Date.now();
     const linkKey = REDIS_KEYS.LINK(userId, linkKeyTimestamp);
     const linkKeySuffix = `${userId}:${linkKeyTimestamp}`;
-
-    await redis.set(linkKey, JSON.stringify({ url: normalizedUrl, platform }), "EX", REDIS_KEYS.LINK_TTL_SECONDS);
+    try {
+        await redis.set(linkKey, JSON.stringify({ url: normalizedUrl, platform }), "EX", REDIS_KEYS.LINK_TTL_SECONDS);
+    } catch (err) {
+        logger.warn("Failed to store link key (audio button unavailable)", {
+            userId,
+            err: (err as Error).message,
+        });
+    }
 
     // Check cache first for VIDEO
     const cachedVideo = await CacheService.getMedia(normalizedUrl, platform, "video");
@@ -53,21 +64,28 @@ export async function handleMessage(ctx: Context): Promise<void> {
         return;
     }
 
-    // Not in cache, so we drop it into the queue
+    // Not in cache, so we drop it into the queue. enqueueDownload fails fast when
+    // Redis is unavailable (rather than hanging) — surface that to the user instead
+    // of leaving the "downloading" message stuck forever.
     const processingMsg = await ctx.reply(MESSAGES.DETECTED(platform), { parse_mode: "Markdown" });
 
-    const enqueued = await enqueueDownload({
-        chatId: ctx.chat!.id,
-        messageId: processingMsg.message_id,
-        replyToMessageId,
-        url: normalizedUrl,
-        platform,
-        format: "video",
-        requestedAt: Date.now(),
-        audioKey: linkKeySuffix, // Pass it to the worker so it can add the button
-    });
+    try {
+        const enqueued = await enqueueDownload({
+            chatId: ctx.chat!.id,
+            messageId: processingMsg.message_id,
+            replyToMessageId,
+            url: normalizedUrl,
+            platform,
+            format: "video",
+            requestedAt: Date.now(),
+            audioKey: linkKeySuffix, // Pass it to the worker so it can add the button
+        });
 
-    if (enqueued.deduped) {
-        await telegram.editMessage(ctx.chat!.id, processingMsg.message_id, MESSAGES.ALREADY_PROCESSING("video"));
+        if (enqueued.deduped) {
+            await telegram.editMessage(ctx.chat!.id, processingMsg.message_id, MESSAGES.ALREADY_PROCESSING("video"));
+        }
+    } catch (err) {
+        logger.error("Failed to enqueue download", { userId, platform, err });
+        await telegram.editMessage(ctx.chat!.id, processingMsg.message_id, MESSAGES.GENERIC_ERROR);
     }
 }

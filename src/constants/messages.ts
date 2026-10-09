@@ -41,9 +41,9 @@ export const MESSAGES = {
     `• twitter.com or x.com/status/...\n` +
     `• tiktok.com/video/...`,
 
-  FILE_TOO_LARGE:
-    `⚠️ This file is too large for Telegram (max 50MB).\n` +
-    `Try a shorter clip.`,
+  FILE_TOO_LARGE: (maxMb: number) =>
+    `⚠️ This file is larger than Telegram's *${maxMb}MB* upload limit.\n` +
+    `Try a shorter clip or send a smaller video.`,
 
   DOWNLOAD_FAILED:
     `❌ Download failed. The video may be:\n` +
@@ -57,9 +57,6 @@ export const MESSAGES = {
 
   RATE_LIMITED: (resetIn: number) =>
     `🚫 Too many requests! Try again in *${resetIn}s*.`,
-
-  SERVER_BUSY: (active: number, max: number) =>
-    `⏳ Server is busy (${active}/${max} downloads running).\nPlease wait and try again.`,
 
   ALREADY_PROCESSING: (format: string) =>
     `⏳ Already downloading your ${format}... please wait.`,

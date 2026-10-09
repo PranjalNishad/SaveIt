@@ -16,6 +16,27 @@ const TRACKING_PARAMS = new Set([
     "tt_from",
 ]);
 
+const YOUTUBE_ID = /^[\w-]{5,}$/;
+
+/**
+ * Extracts a YouTube video id from any supported URL form so shorts, watch and
+ * youtu.be links map to one canonical key.
+ */
+export function youtubeVideoId(url: URL): string | null {
+    const host = url.hostname.toLowerCase();
+    const clean = (value: string | null): string | null =>
+        value && YOUTUBE_ID.test(value) ? value : null;
+
+    if (host === "youtu.be") {
+        return clean(url.pathname.slice(1).replace(/\/+$/, ""));
+    }
+    if (url.pathname === "/watch") {
+        return clean(url.searchParams.get("v"));
+    }
+    const match = url.pathname.match(/^\/(?:shorts|live|embed)\/([\w-]+)/);
+    return match ? clean(match[1]) : null;
+}
+
 /**
  * Strips tracking query parameters from a URL so the same content
  * always maps to the same cache key regardless of who shared it.
@@ -27,6 +48,11 @@ const TRACKING_PARAMS = new Set([
 export function normalizeUrl(rawUrl: string, platform: Platform): string {
     try {
         const url = new URL(rawUrl);
+
+        if (platform === "youtube") {
+            const id = youtubeVideoId(url);
+            if (id) return `https://www.youtube.com/watch?v=${id}`;
+        }
 
         if (platform === "instagram") {
             url.search = "";

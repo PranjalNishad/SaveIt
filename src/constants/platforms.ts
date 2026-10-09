@@ -1,22 +1,26 @@
 import type { Platform } from "@/types";
 
-export const PLATFORM_PATTERNS: Record<Platform, RegExp[]> = {
-  youtube:   [/youtube\.com\/shorts\//i, /youtu\.be\//i, /youtube\.com\/watch\?v=/i],
-  instagram: [/instagram\.com\/reel\//i, /instagram\.com\/p\//i, /instagram\.com\/stories\//i],
-  twitter:   [/twitter\.com\/.+\/status\//i, /x\.com\/.+\/status\//i],
-  tiktok:    [/tiktok\.com\/@.+\/video\//i, /vm\.tiktok\.com\//i],
+// Exact, lowercased hostname allowlists. Validation matches against
+// URL.hostname ONLY, so a path or query string that merely *contains* a
+// platform name (e.g. https://evil.com/?u=youtube.com/watch?v=x) can never match.
+export const PLATFORM_HOSTS: Record<Platform, string[]> = {
+  youtube: ["youtube.com", "www.youtube.com", "m.youtube.com", "music.youtube.com", "youtu.be"],
+  instagram: ["instagram.com", "www.instagram.com", "m.instagram.com"],
+  twitter: ["twitter.com", "www.twitter.com", "mobile.twitter.com", "x.com", "www.x.com"],
+  tiktok: ["tiktok.com", "www.tiktok.com", "m.tiktok.com", "vm.tiktok.com", "vt.tiktok.com"],
+};
+
+// Tested against URL.pathname ONLY (not the full URL string).
+export const PLATFORM_PATHS: Record<Platform, RegExp[]> = {
+  youtube: [/^\/shorts\/[\w-]+/, /^\/live\/[\w-]+/, /^\/embed\/[\w-]+/],
+  instagram: [/^\/reels?\/[\w-]+/, /^\/p\/[\w-]+/, /^\/tv\/[\w-]+/, /^\/stories\/[\w.-]+\/[\w-]+/],
+  twitter: [/^\/i\/status\/\d+/, /^\/[\w.-]+\/status\/\d+/],
+  tiktok: [/^\/@[\w.-]+\/video\/\d+/, /^\/video\/\d+/, /^\/t\/[\w-]+/, /^\/[\w-]{5,}\/?$/],
 };
 
 export const PLATFORM_NAMES: Record<Platform, string> = {
-  youtube:   "YouTube",
+  youtube: "YouTube",
   instagram: "Instagram",
-  twitter:   "Twitter / X",
-  tiktok:    "TikTok",
+  twitter: "Twitter / X",
+  tiktok: "TikTok",
 };
-
-// These platforms serve pre-merged mp4 — download directly without queue
-export const FAST_PLATFORMS: Platform[] = [
-  "instagram",
-  "tiktok",
-  "twitter",
-];

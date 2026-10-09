@@ -132,8 +132,8 @@ Removed:
 
 ### `docker-compose.yml`
 Added:
-- `./cookies:/app/cookies:ro` volume — drop cookie files here, refresh without
-  rebuild.
+- `./cookies:/app/cookies:rw` volume — drop cookie files here, refresh without
+  rebuild. Mounted read-write because yt-dlp rewrites the cookie jar after a run.
 - Env passthrough/examples: `YOUTUBE_COOKIES_FILE`, `INSTAGRAM_COOKIES_FILE`,
   `COBALT_API_KEY`, `COBALT_INSTANCES`, `YTDLP_YT_CLIENTS`.
 

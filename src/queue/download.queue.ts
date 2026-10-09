@@ -8,8 +8,14 @@ import { REDIS_KEYS } from "@/constants/redis-keys";
 import { env } from "@/config/env";
 import { throttled } from "@/utils/log-throttle";
 
-// Create a dedicated Redis connection for the queue (BullMQ requirement)
-const queueRedis = createRedisConnection("queue");
+// Dedicated connection for the BullMQ Queue. BullMQ requires the "bullmq"
+// profile (blocking commands must be allowed to wait indefinitely).
+const queueRedis = createRedisConnection("queue", "bullmq");
+
+// Separate FAIL-FAST connection for the in-flight dedupe keys. The bullmq profile
+// queues commands forever when Redis is down, which would hang the bot's message
+// handler on `await enqueueDownload`. The app profile rejects instead.
+const dedupeRedis = createRedisConnection("dedupe", "app");
 
 function hashUrl(url: string): string {
     return createHash("sha1").update(url).digest("hex");
@@ -40,7 +46,7 @@ videoQueue.on("error", (err) => {
 export async function enqueueDownload(data: DownloadJobData): Promise<EnqueueResult> {
     const inFlightKey = REDIS_KEYS.INFLIGHT_DOWNLOAD(data.chatId, data.format, hashUrl(data.url));
 
-    const acquired = await queueRedis.set(inFlightKey, "1", "EX", env.INFLIGHT_DEDUPE_TTL, "NX");
+    const acquired = await dedupeRedis.set(inFlightKey, "1", "EX", env.INFLIGHT_DEDUPE_TTL, "NX");
     if (!acquired) {
         logger.info("Skipped duplicate in-flight job", {
             chatId: data.chatId,
@@ -71,7 +77,9 @@ export async function enqueueDownload(data: DownloadJobData): Promise<EnqueueRes
             deduped: false,
         };
     } catch (err) {
-        await queueRedis.del(inFlightKey);
+        await dedupeRedis.del(inFlightKey).catch(() => {
+            /* best effort — key expires via TTL anyway */
+        });
         logger.error("Failed to enqueue job", err);
         throw err;
     }

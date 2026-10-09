@@ -1,5 +1,6 @@
 import { spawn } from "child_process";
 import { tempFilePath, getFileSizeBytes } from "@/utils/file";
+import { hasFreeDiskSpace } from "@/utils/disk";
 import { logger } from "@/utils/logger";
 import { env } from "@/config/env";
 import { DOWNLOAD } from "@/constants";
@@ -329,6 +330,18 @@ export async function downloadMedia(
 
   logger.info("Starting download", { url, format, platform, outputPath });
 
+  // Refuse early when the disk is nearly full: a full disk produces confusing
+  // yt-dlp/ffmpeg failures and can leave partial files behind. A low-disk result
+  // is classified permanent so it is not retried.
+  const minFreeBytes = env.MIN_FREE_DISK_MB * 1024 * 1024;
+  if (!(await hasFreeDiskSpace(env.TEMP_DIR, minFreeBytes))) {
+    logger.error("Insufficient free disk space — refusing download", {
+      tempDir: env.TEMP_DIR,
+      requiredMb: env.MIN_FREE_DISK_MB,
+    });
+    return { success: false, error: "DISK_FULL: not enough free disk space to start the download" };
+  }
+
   try {
     let success = false;
     let error: string | undefined;
@@ -360,12 +373,18 @@ export async function downloadMedia(
     }
 
     if (!success) {
+      // A failed download can leave a partial file behind (yt-dlp killed by the
+      // timeout, or a non-zero exit). Remove it so failures never accumulate in
+      // TEMP_DIR. The YouTube path already unlinks between attempts; this covers
+      // the non-YouTube path and the final failure.
+      await safeUnlink(outputPath);
       return { success: false, error: error ?? "Download failed" };
     }
 
     const sizeBytes = await getFileSizeBytes(outputPath);
 
     if (sizeBytes <= 0) {
+      await safeUnlink(outputPath);
       return { success: false, error: "Downloaded file not found or empty" };
     }
 
@@ -383,6 +402,8 @@ export async function downloadMedia(
   } catch (err: any) {
     const msg = err?.message ?? String(err);
     logger.error("Download failed", { url, error: msg });
+    // Never leave a partial file behind on an unexpected error either.
+    await safeUnlink(outputPath);
     return { success: false, error: msg };
   }
 }

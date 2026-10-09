@@ -1,9 +1,11 @@
+import { env } from "@/config/env";
+
 export const QUEUE = {
     NAME: "video-download",
     JOB_NAME: "download",
     MAX_ATTEMPTS: 3,
     RETRY_DELAY_MS: 3000,
-    WORKER_CONCURRENCY: 30,
+    WORKER_CONCURRENCY: env.WORKER_CONCURRENCY,
     RATE_LIMITER_MAX: 5,
     RATE_LIMITER_DURATION_MS: 1000,
     KEEP_COMPLETED: 50,

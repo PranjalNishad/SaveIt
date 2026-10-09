@@ -15,12 +15,7 @@ RUN apk add --no-cache \
     ffmpeg \
     tini \
     curl \
-    unzip \
-    nodejs && \
-    py3-pip \
-    ffmpeg \
-    tini \
-    curl
+    nodejs
 
 # yt-dlp lives in a venv owned by the runtime user so it can self-update at
 # startup without root (YouTube breaks often — stale yt-dlp = broken downloads).

@@ -10,3 +10,5 @@ logs/
 dump.rdb
 cookies.txt
 *_cookies.txt
+.claude/
+.commandcode/

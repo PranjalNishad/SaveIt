@@ -3,6 +3,10 @@ import { env } from "@/config/env";
 import { REDIS_KEYS } from "@/constants";
 import type { RateLimitInfo } from "@/types";
 import { createHash } from "crypto";
+import { logger } from "@/utils/logger";
+import { throttled } from "@/utils/log-throttle";
+
+const throttleRedisErr = throttled();
 
 function hashUrl(url: string): string {
     return createHash("sha1").update(url).digest("hex");
@@ -49,7 +53,19 @@ export async function checkRateLimit(userId: number, normalizedUrl?: string): Pr
     end
   `;
 
-    const res = (await redis.eval(lua, 2, key, dedupeKey, now, windowMs, env.RATE_LIMIT_MAX, env.RATE_LIMIT_WINDOW)) as Array<any>;
+    let res: Array<any>;
+    try {
+        res = (await redis.eval(lua, 2, key, dedupeKey, now, windowMs, env.RATE_LIMIT_MAX, env.RATE_LIMIT_WINDOW)) as Array<any>;
+    } catch (err) {
+        // Fail open: a Redis outage must not block every user's requests.
+        throttleRedisErr(() =>
+            logger.warn("Rate limit check failed (Redis) — failing open", {
+                error: (err as Error).message,
+            }),
+        );
+        return { allowed: true, remaining: env.RATE_LIMIT_MAX, resetInSeconds: 0 };
+    }
+
     const allowed = res[0] === 1;
     const remaining = Number(res[1] ?? 0);
     const oldestTs = Number(res[2] ?? now);

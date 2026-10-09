@@ -1,78 +1,34 @@
 import { Worker, type Job } from "bullmq";
 import { logger } from "@/utils/logger";
+import { TelegramService } from "@/services/telegram.service";
 import { downloadMedia } from "@/services/download.service";
 import { CacheService } from "@/services/cache.service";
-import { TelegramService } from "@/services/telegram.service";
-import { safeDelete } from "@/utils/file";
-import { MESSAGES } from "@/constants/messages";
+import { safeDelete, sweepTempDir } from "@/utils/file";
 import { QUEUE } from "@/constants/queue";
+import { videoQueue } from "@/queue/download.queue";
 import { env } from "@/config/env";
 import { createRedisConnection, redis } from "@/config/redis";
 import { throttled } from "@/utils/log-throttle";
-import type { DownloadJobData } from "@/types";
+import { processJob, type DownloadJob, type JobProcessorDeps } from "@/worker/process-job";
 
 const telegram = new TelegramService(env.BOT_TOKEN);
-const workerRedis = createRedisConnection("worker");
+const workerRedis = createRedisConnection("worker", "bullmq");
 
-async function processJob(job: Job<DownloadJobData & { audioKey?: string }>): Promise<void> {
-    const { chatId, messageId, replyToMessageId, url, format, platform, audioKey } = job.data;
+const jobDeps: JobProcessorDeps = {
+    telegram,
+    download: downloadMedia,
+    cacheMedia: (url, platform, format, fileId) => CacheService.saveMedia(url, platform, format, fileId),
+    getCached: (url, platform, format) => CacheService.getMedia(url, platform, format),
+    removeFile: safeDelete,
+};
 
-    logger.info("Processing job", {
-        jobId: job.id,
-        url,
-        format,
-        platform,
-        chatId,
-    });
+// Conservative sweep age: comfortably longer than the longest legitimate download
+// (yt-dlp timeout + buffer) and never below an hour, so a healthy in-flight file
+// is never deleted.
+const TEMP_SWEEP_MAX_AGE_MS = Math.max(60 * 60_000, env.YTDLP_TIMEOUT_SECONDS * 1000 + 5 * 60_000);
+const METRICS_INTERVAL_MS = 60_000;
 
-    await telegram.editMessage(chatId, messageId, MESSAGES.PROCESSING(format));
-
-    const result = await downloadMedia(url, format, platform);
-
-    if (!result.success) {
-        const isTooLarge = result.error?.startsWith("FILE_TOO_LARGE");
-        await telegram.editMessage(chatId, messageId, isTooLarge ? MESSAGES.FILE_TOO_LARGE : MESSAGES.DOWNLOAD_FAILED);
-        if (result.filePath) await safeDelete(result.filePath);
-        if (isTooLarge) return;
-        throw new Error(result.error ?? "Unknown download error");
-    }
-
-    try {
-        let fileId: string | undefined;
-        if (format === "audio") {
-            const msg = await telegram.sendAudio(chatId, result.filePath!, {
-                replyToMessageId,
-            });
-            fileId = msg.audio?.file_id ?? (msg as any).document?.file_id;
-        } else {
-            const msg = await telegram.sendVideo(chatId, result.filePath!, {
-                audioKey,
-                replyToMessageId,
-            });
-            fileId = msg.video?.file_id ?? (msg as any).document?.file_id;
-        }
-
-        if (fileId) {
-            await CacheService.saveMedia(url, platform, format, fileId);
-            logger.info(`Cached ${format} file_id`, { url });
-        }
-
-        await telegram.editMessage(chatId, messageId, MESSAGES.DONE);
-        logger.info("Job completed successfully", { jobId: job.id, chatId });
-    } catch (sendErr) {
-        logger.error("Failed to send file to user", {
-            jobId: job.id,
-            chatId,
-            sendErr,
-        });
-        await telegram.editMessage(chatId, messageId, MESSAGES.DOWNLOAD_FAILED);
-        throw sendErr;
-    } finally {
-        if (result.filePath) await safeDelete(result.filePath);
-    }
-}
-
-async function releaseInFlightKey(job?: Job<DownloadJobData & { audioKey?: string }>): Promise<void> {
+async function releaseInFlightKey(job?: Job<DownloadJob>): Promise<void> {
     const key = job?.data?.inFlightKey;
     if (!key) return;
 
@@ -86,7 +42,7 @@ async function releaseInFlightKey(job?: Job<DownloadJobData & { audioKey?: strin
     }
 }
 
-const worker = new Worker<DownloadJobData & { audioKey?: string }>(QUEUE.NAME, processJob, {
+const worker = new Worker<DownloadJob>(QUEUE.NAME, (job) => processJob(job, jobDeps), {
     connection: workerRedis,
     concurrency: QUEUE.WORKER_CONCURRENCY,
     limiter: {
@@ -106,8 +62,10 @@ worker.on("failed", async (job, err) => {
     const attemptsAllowed = job?.opts?.attempts ?? 1;
     const attemptsMade = job?.attemptsMade ?? 0;
     const isFinalFailure = attemptsMade >= attemptsAllowed;
+    // UnrecoverableError skips retries, so it may fail before the last attempt.
+    const unrecoverable = err?.name === "UnrecoverableError";
 
-    if (isFinalFailure) {
+    if (isFinalFailure || unrecoverable) {
         await releaseInFlightKey(job);
     }
 
@@ -126,15 +84,35 @@ worker.on("error", (err) =>
     ),
 );
 
+// Lightweight observability: log queue depth periodically so a building backlog
+// or a spike in failures is visible without adding a metrics stack.
+setInterval(() => {
+    videoQueue
+        .getJobCounts("waiting", "active", "completed", "failed", "delayed")
+        .then((counts) => logger.info("Queue metrics", counts))
+        .catch((err: Error) => logger.warn("Queue metrics unavailable", { err: err.message }));
+}, METRICS_INTERVAL_MS).unref?.();
+
 // Keep worker alive on stray async errors — BullMQ retries the job itself.
 process.on("unhandledRejection", (reason) => {
   logger.error("Worker unhandledRejection", { reason: String(reason) });
 });
+// An uncaught exception leaves the process in an unknown state — exit so the
+// supervisor restarts it cleanly instead of running corrupted.
 process.on("uncaughtException", (err) => {
-  logger.error("Worker uncaughtException", { err: err.message });
+  logger.error("Worker uncaughtException — exiting for clean restart", {
+    err: err.message,
+    stack: err.stack,
+  });
+  process.exit(1);
 });
 
 async function main() {
+    // Remove orphaned temp files left by a previous crash/force-kill before we
+    // begin accepting jobs. Age-guarded so nothing in-flight is removed.
+    const swept = await sweepTempDir(TEMP_SWEEP_MAX_AGE_MS);
+    if (swept > 0) logger.info(`Swept ${swept} stale temp file(s) from ${env.TEMP_DIR}`);
+
     logger.info("✅ Worker started, waiting for jobs...");
     process.once("SIGINT", async () => {
         await worker.close();

@@ -51,6 +51,7 @@ From [package.json](package.json):
 - `bun run start:bot`: run only bot
 - `bun run start:worker`: run only worker
 - `bun run typecheck`: TypeScript validation
+- `bun test`: run the test suite (mocks Telegram/Redis/yt-dlp; no network or credentials needed)
 
 ## Prerequisites
 
@@ -147,8 +148,16 @@ Defined in [.env.example](.env.example) and parsed in [src/config/env.ts](src/co
 
 ### Media and cache
 
-- `MAX_FILE_SIZE_MB` (default `50`)
+- `MAX_FILE_SIZE_MB` (default `50`) — clamped to 50 (Telegram bot upload limit)
 - `MEDIA_CACHE_TTL_SECONDS` (default `86400`)
+- `MIN_FREE_DISK_MB` (default `500`) — refuse downloads when free disk is below this
+
+### Worker and downloader
+
+- `WORKER_CONCURRENCY` (default `4`) — concurrent download jobs per worker
+- `YTDLP_TIMEOUT_SECONDS` (default `300`) — per-run yt-dlp timeout
+- `YTDLP_FORMAT_SELECTOR` (default `bv*+ba/b`) — yt-dlp `-f` selector
+- `SHUTDOWN_GRACE_MS` (default `60000`) — supervisor drain window before force-kill
 
 ### Logging and paths
 
@@ -179,16 +188,23 @@ Defined in [.env.example](.env.example) and parsed in [src/config/env.ts](src/co
 3. Build command: `bun run build`
 4. Start command: `bun run start`
 
-The app opens an HTTP health endpoint when `PORT` is set, which helps web-service style platforms.
+The app opens an HTTP health endpoint when `PORT` is set, which helps web-service style platforms. It returns `200` when Redis is reachable and `503` otherwise (readiness, not just liveness).
+
+## Operations
+
+See [docs/OPERATIONS.md](docs/OPERATIONS.md) for the token-rotation procedure, how to
+verify only one poller is active, secret-handling rules, and graceful-shutdown/health
+semantics.
 
 ## Docker Image Notes
 
 The Docker image:
 
 - Uses Bun Alpine base image
-- Installs `python3`, `py3-pip`, `ffmpeg`, `tini`
-- Installs latest `yt-dlp`
+- Installs `python3`, `ffmpeg`, `tini`, `curl`, `nodejs`
+- Installs `yt-dlp` into a Bun-owned virtualenv (`/app/venv`) so it can self-update
 - Runs as non-root `bun` user
+- Ships a readiness endpoint and, in Compose, Redis + app healthchecks
 
 See [Dockerfile](Dockerfile).
 
@@ -218,6 +234,14 @@ If the same user requests same normalized URL + format while job is already acti
     - update `yt-dlp`
 - Large media rejected:
     - reduce clip length or use audio flow
+- `409: Conflict: terminated by other getUpdates request`:
+    - another process or host is polling with the same token. The bot now takes a
+      Redis lock (`bot:poller`) and exits cleanly instead of hot-looping, but you
+      must ensure only ONE deployment uses this bot token.
+- Instagram always fails with `empty media response`:
+    - Instagram requires valid cookies. Drop a fresh `cookies/instagram_cookies.txt`
+      (local dev; auto-detected) or mount it at `/app/cookies/instagram_cookies.txt`
+      (Docker). Cookies expire — refresh them when Reels start failing.
 
 ## Security and Operations Best Practices
 

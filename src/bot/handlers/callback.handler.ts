@@ -5,110 +5,13 @@ import { redis } from "@/config/redis";
 import { enqueueDownload } from "@/queue/download.queue";
 import { CacheService } from "@/services/cache.service";
 import { TelegramService } from "@/services/telegram.service";
-import { downloadMedia } from "@/services/download.service";
-import { safeDelete } from "@/utils/file";
 import { env } from "@/config/env";
-import { DOWNLOAD, FAST_PLATFORMS } from "@/constants";
 import type { Platform, OutputFormat } from "@/types";
 import { REDIS_KEYS } from "@/constants/redis-keys";
 import { normalizeUrl } from "@/utils/url";
+import { rateLimitMiddleware } from "@/bot/middleware/rate-limit";
 
 const telegram = new TelegramService(env.BOT_TOKEN);
-
-// ── Global + per-user download tracking ──────────────────────────────────────
-let activeDownloads = 0;
-const userActiveDownloads = new Map<number, number>();
-
-function getUserDownloads(userId: number): number {
-  return userActiveDownloads.get(userId) ?? 0;
-}
-
-function incrementUser(userId: number): void {
-  userActiveDownloads.set(userId, getUserDownloads(userId) + 1);
-}
-
-function decrementUser(userId: number): void {
-  const current = getUserDownloads(userId);
-  if (current <= 1) {
-    userActiveDownloads.delete(userId);
-  } else {
-    userActiveDownloads.set(userId, current - 1);
-  }
-}
-
-// ── Fast download handler (Instagram, TikTok, Twitter) ────────────────────────
-async function handleFastDownload(
-  chatId: number,
-  messageId: number,
-  url: string,
-  format: OutputFormat,
-  platform: Platform,
-  replyToMessageId?: number,
-): Promise<void> {
-  const userId = chatId;
-
-  // Check global limit (30 simultaneous downloads)
-  if (activeDownloads >= DOWNLOAD.MAX_CONCURRENT_DOWNLOADS) {
-    await telegram.editMessage(
-      chatId,
-      messageId,
-      MESSAGES.SERVER_BUSY(activeDownloads, DOWNLOAD.MAX_CONCURRENT_DOWNLOADS),
-    );
-    return;
-  }
-
-  // Check per-user limit (5 links at once)
-  if (getUserDownloads(userId) >= DOWNLOAD.MAX_LINKS_PER_USER) {
-    await telegram.editMessage(
-      chatId,
-      messageId,
-      `⏳ You already have *${DOWNLOAD.MAX_LINKS_PER_USER}* downloads running.\nWait for one to finish first.`,
-    );
-    return;
-  }
-
-  activeDownloads++;
-  incrementUser(userId);
-  logger.info(`Downloads`, {
-    global: activeDownloads,
-    user: getUserDownloads(userId),
-  });
-
-  try {
-    const result = await downloadMedia(url, format, platform);
-
-    if (!result.success) {
-      await telegram.editMessage(
-        chatId,
-        messageId,
-        result.error?.startsWith("FILE_TOO_LARGE")
-          ? MESSAGES.FILE_TOO_LARGE
-          : MESSAGES.DOWNLOAD_FAILED,
-      );
-      if (result.filePath) safeDelete(result.filePath);
-      return;
-    }
-
-    try {
-      if (format === "audio") {
-        await telegram.sendAudio(chatId, result.filePath!, { replyToMessageId });
-      } else {
-        await telegram.sendVideo(chatId, result.filePath!, { replyToMessageId });
-      }
-      await telegram.editMessage(chatId, messageId, MESSAGES.DONE);
-    } finally {
-      if (result.filePath) safeDelete(result.filePath);
-    }
-
-  } finally {
-    activeDownloads--;
-    decrementUser(userId);
-    logger.info(`Downloads after completion`, {
-      global: activeDownloads,
-      user: getUserDownloads(userId),
-    });
-  }
-}
 
 // ── Main callback handler ─────────────────────────────────────────────────────
 export async function handleCallback(ctx: Context): Promise<void> {
@@ -138,6 +41,10 @@ export async function handleCallback(ctx: Context): Promise<void> {
       ?.message_id as number | undefined;
     const outputFormat = format as OutputFormat;
 
+    // Per-user rate limit applies to this path too (not just new links).
+    const allowed = await rateLimitMiddleware(ctx, normalizedUrl);
+    if (!allowed) return;
+
     // ── Check cache first ─────────────────────────────────────────────────────
     const cached = await CacheService.getMedia(normalizedUrl, platform, outputFormat);
     if (cached) {
@@ -150,31 +57,15 @@ export async function handleCallback(ctx: Context): Promise<void> {
       return;
     }
 
+    // ── Every download goes through BullMQ ────────────────────────────────────
     const processingMsg = await ctx.reply(
       MESSAGES.PROCESSING(outputFormat),
       { parse_mode: "Markdown" },
     );
 
-    const chatId = ctx.chat!.id;
-    const messageId = processingMsg.message_id;
-
-    // ── Fast path — Instagram, TikTok, Twitter ────────────────────────────────
-    if (FAST_PLATFORMS.includes(platform)) {
-      handleFastDownload(
-        chatId,
-        messageId,
-        normalizedUrl,
-        outputFormat,
-        platform,
-        replyToMessageId,
-      ).catch((err) => logger.error("Fast download error", err));
-      return;
-    }
-
-    // ── Queue path — YouTube ──────────────────────────────────────────────────
     const enqueued = await enqueueDownload({
-      chatId,
-      messageId,
+      chatId: ctx.chat!.id,
+      messageId: processingMsg.message_id,
       replyToMessageId,
       url: normalizedUrl,
       format: outputFormat,
@@ -184,8 +75,8 @@ export async function handleCallback(ctx: Context): Promise<void> {
 
     if (enqueued.deduped) {
       await telegram.editMessage(
-        chatId,
-        messageId,
+        ctx.chat!.id,
+        processingMsg.message_id,
         MESSAGES.ALREADY_PROCESSING(outputFormat),
       );
     }
